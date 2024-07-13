@@ -2,38 +2,32 @@
 //
 // a big tic tac toe game
 
-/* todo:
-    [x] detect winner of a sub game
-    [ ] draw line for winner
-    [ ] grey out
-    [ ] disable input into complete subgames
-    [x] don't draw outside the boundary of the game board
-    [ ] switch to drawing around a center point
-    [ ] switch to left handed?
-    [ ] restart game
-    [ ] main menu
-    [ ] AI
-    [ ] readme with pretty pictures
+/* 
+TODO:
+[x] detect winner of a sub game
+[ ] draw line for winner
+[x] grey out
+[x] disable input into complete subgames
+[x] don't draw outside the boundary of the game board
+[ ] win screen
+[ ] make tests
+[ ] restart option on win screen
+[ ] main menu
+[ ] rename stuff and comment stuff... your shit doesn't make sense rn
+[ ] switch to drawing around a center point
+[ ] switch to left handed?
+[ ] AI
+[ ] readme with pretty pictures
+[ ] little jiggle when you try to play somewhere you aren't allowed
 
-    [ ] another level of the recursion?
+
+indices reminder
 
   6 | 7 | 8
   --+---+--
   3 | 4 | 5
   --+---+--
   0 | 1 | 2
-
-  win conditions
-  0 == 1 == 2
-  0 == 3 == 6
-
-  0 == 4 == 8
-  3 == 4 == 5
-  1 == 4 == 7
-  2 == 4 == 6
-  
-  6 == 7 == 8
-  2 == 5 == 8
 */
 
 my_window: Window_Type;
@@ -66,18 +60,17 @@ GameState :: struct {
     winner :      Letter;
 }
 
-BG_COLOR   := Vector4.{.1, .1, .1, 1};
-BASE_COLOR := Vector4.{.8, .8, .8,  1};
+BG_COLOR   := Vector4.{.1,   .1,  .1,  1};
+BASE_COLOR := Vector4.{.8,   .8,  .8,  1};
 HOT_COLOR  := Vector4.{.38, .54, .59, .8};
-WIN_COLOR  := Vector4.{.8, .8, .8, .5}
+WIN_COLOR  := Vector4.{.4,   .4,  .4,  1};
+
 
 main :: () {
     #if OS == .WINDOWS {
         Windows :: #import "Windows";
         Windows.SetProcessDPIAware();
-
-        // Windows is very bad at thread-switching by default unless you do this. Sad.
-        Windows.timeBeginPeriod(1);
+        Windows.timeBeginPeriod(1);  // Windows is very bad at thread-switching by default unless you do this. Sad.
     }
 
     my_window = create_window(window_width, window_height, "Tic-Tac-Toe");
@@ -86,7 +79,12 @@ main :: () {
         Windows.DragAcceptFiles(my_window, cast(Windows.BOOL) true);
     } else #if OS == .LINUX {
         X11 :: #import "X11";
-        typelist := string.["url/url", "text/uri-list", "text/plain", "application/octet-stream"];
+        typelist := string.[
+            "url/url",
+            "text/uri-list",
+            "text/plain",
+            "application/octet-stream"
+        ];
         X11.enable_drag_and_drop(my_window, typelist);
     } else #if OS == .MACOS {
         #import "Objective_C";
@@ -104,7 +102,7 @@ main :: () {
 
     quit := false;
     while !quit {
-        current_time = get_time();
+        current_time = seconds_since_init();
         dt := cast(float)(current_time - last_time);
         Clamp(*dt, 0, 0.1);
         last_time = current_time;
@@ -124,9 +122,8 @@ main :: () {
             }
         }
 
-        clicked := false;
-        
         // other events
+        clicked := false;
         for event: Input.events_this_frame {
             if event.type == .QUIT then quit = true;
             if event.key_code == .MOUSE_BUTTON_LEFT && event.key_pressed {
@@ -139,27 +136,26 @@ main :: () {
             mouse_x, mouse_y, _ := get_mouse_pointer_position(true);
             r := get_main_rect(my_window);
             clicked_idx := screen_coord_to_board_idx(mouse_x, mouse_y, r);
-            
-            print("%\n", clicked_idx);
-            
-            if clicked_idx < 81 {
+            valid_idx := clicked_idx < 81 && clicked_idx >= 0;
+
+            live_game := state.wins[clicked_idx / 9] == .NONE;
+
+            if valid_idx && live_game {
                 state.board[clicked_idx] = state.turn;
-                // state.turn = ifx state.turn == .X then .O else .X;
+                state.turn = ifx state.turn == .X then .O else .X;
             }
         }
 
         // check for winners
         for 0..8 {
             if state.wins[it] == .NONE {
-                // if we don't have a winner, check if we do
-                state.wins[it] = check_for_winner(state.board, it * 9);
+                new_status := check_for_winner(state.board, it * 9);
+                state.wins[it] = new_status;
             }
         }
 
         // check for game over
         state.winner = check_for_winner(state.wins, 0);
-
-        if state.winner != .NONE  print("winner: %", state.winner);
 
         // draw call
         draw_one_frame(state, dt);
@@ -175,7 +171,7 @@ draw_one_frame :: (state: GameState, dt: float) {
 
     r := get_main_rect(my_window);
 
-    draw_grid(r, L, color);
+    draw_grid(r, L, BASE_COLOR);
 
     sv := cast(float) r.w / 3;  // vertical step size
     sh := cast(float) r.h / 3;  // horizontal step size
@@ -184,28 +180,36 @@ draw_one_frame :: (state: GameState, dt: float) {
     main_grid_col, sub_grid_col: int;
     main_grid_row, sub_grid_row: int;
 
-    // draw the 9 subgrids -- since this is right-handed, we draw bottom left to top right
-    for i: 0..2 {
-        for j: 0..2 {
+    // draw the 9 subgrids -- checking if a grid is "done" and greying it out
+    for row: 0..2 {
+        for col: 0..2 {
             // draw the sub grid
-            x  := r.x + i * sh;
-            y  := r.y + j * sv;
+            x  := r.x + col * sh;
+            y  := r.y + row * sv;
             sr := get_rect(x, y, sh, sv);
             sr = shrink_by(sr, .05);
-            draw_grid(sr, l, color);
+
+            idx := grid_to_idx(row, col);
+            if state.wins[idx] != .NONE  draw_grid(sr, l, WIN_COLOR);
+            else                         draw_grid(sr, l, BASE_COLOR);
         }
     }
 
     // draw hot rect inside that sub grid
-    if is_point_in_rect(xx mouse_x, xx mouse_y, r) {
+    if is_point_in_rect(xx mouse_x, xx mouse_y, r) {  // if inside the board
         main_grid_col = cast(int) (mouse_x - r.x) / cast(int) sv;
         main_grid_row = cast(int) (mouse_y - r.y) / cast(int) sh;
         hL := L / 2;
-        
+
+        // only draw the hot rects if that game is still live, otherwise, we bail
+        idx := grid_to_idx(main_grid_row, main_grid_col);
+        sub_game_live := state.wins[idx] == .NONE;
+
         mouse_rect := get_rect(r.x + main_grid_col * sh + hL, r.y + main_grid_row * sv + hL, sh - L, sv - L);
         mouse_rect = shrink_by(mouse_rect, .05);
-        
-        if is_point_in_rect(xx mouse_x, xx mouse_y, mouse_rect) {
+        mouse_in_board := is_point_in_rect(xx mouse_x, xx mouse_y, mouse_rect);
+
+        if sub_game_live &&  mouse_in_board {
             ssh := (mouse_rect.w / 3);
             ssv := (mouse_rect.h / 3);
             sub_grid_col = cast(int) (mouse_x - mouse_rect.x) / cast(int) ssh;
@@ -216,7 +220,14 @@ draw_one_frame :: (state: GameState, dt: float) {
 
             hot_rect := get_rect(mouse_rect.x + sub_grid_col * ssh + xhl, mouse_rect.y + sub_grid_row * ssv + yhl, ssh - l, ssv - l);
             hot_rect = shrink_by(hot_rect, .05);
-            Simp.immediate_quad(hot_rect.x, hot_rect.y, hot_rect.x + hot_rect.w, hot_rect.y + hot_rect.h, hot_color);
+            Simp.immediate_quad(
+                hot_rect.x, 
+                hot_rect.y, 
+                hot_rect.x + hot_rect.w, 
+                hot_rect.y + hot_rect.h, 
+                HOT_COLOR
+            );
+
         } else {
             sub_grid_col = -1;
             sub_grid_row = -1;
@@ -226,6 +237,9 @@ draw_one_frame :: (state: GameState, dt: float) {
     // draw the Xs and Os
     for letter, i : state.board {
         sub :int = i / 9;  // which sub board we are in
+
+        color := ifx state.wins[sub] != .NONE then WIN_COLOR else BASE_COLOR;
+
         sub_x, sub_y := idx_to_grid_coord(sub);
         sub_r := grid_coord_to_rect(sub_x, sub_y, r, L);
 
@@ -240,7 +254,7 @@ draw_one_frame :: (state: GameState, dt: float) {
         }
     }
 
-    Simp.draw_text(my_font, 32, 32, tprint("%", state.turn));
+    Simp.draw_text(my_font, 32, 32, tprint("%'s turn", state.turn));
 
     Simp.swap_buffers(my_window);
 }  // draw_one_frame
@@ -254,15 +268,16 @@ draw_grid :: (r: Rect, l: float, c: Vector4) {
     y := r.y;
     Simp.immediate_quad(    x + s - hl, y,     x + s + hl, y + r.h, c);
     Simp.immediate_quad(x + 2 * s - hl, y, x + 2 * s + hl, y + r.h, c);
-    
+
     Simp.immediate_quad(x,     y + s - hl, x + r.w,     y + s + hl, c);
     Simp.immediate_quad(x, y + 2 * s - hl, x + r.w, y + 2 * s + hl, c);
 }
 
 //
-// get the x, y position of the bottom left corner given an index 
+// get the x, y position of the bottom left corner given an index
 // and the rect containing the whole board
 idx_to_board_position :: (idx: int, r: Rect, l: float) -> x: float, y: float {
+    assert(idx < 81 && idx >= 0);
     i := idx % 9;
     s := r.w / 3;
     x := r.x + (i % 3) * (s + l);
@@ -271,18 +286,24 @@ idx_to_board_position :: (idx: int, r: Rect, l: float) -> x: float, y: float {
     return x, y;
 }
 
+grid_to_idx :: (row: int, col: int) -> int {
+    // assert(row < 3 && row >= 0);
+    // assert(col < 3 && col >= 0);
+    return row * 3 + col;
+}
+
 same :: (a: Letter, b: Letter, c: Letter) -> bool {
     return a == b && b == c && a == c;
 }
 
-// TODO (brice): return the line that we should draw as a part of the return information
+// TODO (brice): return the line that we should draw as a part of the return
 check_for_winner :: (arr: []Letter, o: int) -> Letter {
     assert(o % 9 == 0);
-    for 0..2 {
-        i := it * 3 + o;
+        for 0..2 {
+        i := o + it * 3;
         if same(arr[i], arr[i + 1], arr[i + 2])  return arr[i];
-        
-        i = it;
+
+        i = o + it;
         if same(arr[i], arr[i + 3], arr[i + 6])  return arr[i];
     }
 
@@ -292,16 +313,12 @@ check_for_winner :: (arr: []Letter, o: int) -> Letter {
     return .NONE;
 }
 
-// reset_state :: (state: *State) {
-
-// }
-
 grid_coord_to_rect :: (xi: int, yi: int, r: Rect, l: float) -> Rect {
     sw  := r.w / 3;
     sh  := r.h / 3;
     xhl := ifx xi == 0 then 0 else l / 2;
     yhl := ifx yi == 0 then 0 else l / 2;
-    
+
     inner_rect := get_rect(r.x + xi * sw + xhl, r.y + yi * sh + yhl, sw - l, sh - l);
     inner_rect = shrink_by(inner_rect, .05);
 
@@ -339,6 +356,10 @@ center_of :: (r: Rect) -> float, float {
 }
 
 screen_coord_to_board_idx :: (x: int, y: int, r: Rect) -> int {
+    if !is_point_in_rect(xx x, xx y, r) {
+        return -1;
+    }
+
     sw := r.w / 3;
     sh := r.h / 3;
     grid_x := cast(int) (x - r.x) / cast(int) sw;
@@ -380,7 +401,7 @@ init_fonts :: () {
     pixel_height := window_height / 22;
     my_font = Simp.get_font_at_size("data", "HeavyDataNerdFont-Regular.ttf", pixel_height);
     assert(my_font != null);
-    
+
     pixel_height /= 2;
     button_font = Simp.get_font_at_size("data", "HeavyDataNerdFont-Regular.ttf", pixel_height);
     assert(button_font != null);
