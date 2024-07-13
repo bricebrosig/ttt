@@ -4,3 +4,5 @@ ttt.code-workspace
 main
 main.dSYM
 .DS_STORE
+*.exe
+*.pdb

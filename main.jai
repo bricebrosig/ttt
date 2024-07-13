@@ -196,7 +196,7 @@ draw_one_frame :: (state: GameState, dt: float) {
     }
 
     // draw hot rect inside that sub grid
-    if is_point_in_rect(xx mouse_x, xx mouse_y, r) {  // if inside the board
+    if is_point_in_rect(xx mouse_x, xx mouse_y, r) {  // if inside main board
         main_grid_col = cast(int) (mouse_x - r.x) / cast(int) sv;
         main_grid_row = cast(int) (mouse_y - r.y) / cast(int) sh;
         hL := L / 2;
@@ -205,7 +205,12 @@ draw_one_frame :: (state: GameState, dt: float) {
         idx := grid_to_idx(main_grid_row, main_grid_col);
         sub_game_live := state.wins[idx] == .NONE;
 
-        mouse_rect := get_rect(r.x + main_grid_col * sh + hL, r.y + main_grid_row * sv + hL, sh - L, sv - L);
+        mouse_rect := get_rect(
+            r.x + main_grid_col * sh + hL, 
+            r.y + main_grid_row * sv + hL, 
+            sh - L, 
+            sv - L
+        );
         mouse_rect = shrink_by(mouse_rect, .05);
         mouse_in_board := is_point_in_rect(xx mouse_x, xx mouse_y, mouse_rect);
 
@@ -218,7 +223,12 @@ draw_one_frame :: (state: GameState, dt: float) {
             xhl := ifx sub_grid_col == 0 then 0 else l / 2;
             yhl := ifx sub_grid_row == 0 then 0 else l / 2;
 
-            hot_rect := get_rect(mouse_rect.x + sub_grid_col * ssh + xhl, mouse_rect.y + sub_grid_row * ssv + yhl, ssh - l, ssv - l);
+            hot_rect := get_rect(
+                mouse_rect.x + sub_grid_col * ssh + xhl, 
+                mouse_rect.y + sub_grid_row * ssv + yhl, 
+                ssh - l, 
+                ssv - l
+            );
             hot_rect = shrink_by(hot_rect, .05);
             Simp.immediate_quad(
                 hot_rect.x, 
@@ -328,8 +338,8 @@ grid_coord_to_rect :: (xi: int, yi: int, r: Rect, l: float) -> Rect {
 // check if given x, y point is inside of a rect
 // @right-handed
 is_point_in_rect :: (x: float, y: float, r: Rect) -> bool {
-    check_x := x >= r.x && x <= (r.x + r.w);
-    check_y := y >= r.y && y <= (r.y + r.h);
+    check_x := x > r.x && x < (r.x + r.w);
+    check_y := y > r.y && y < (r.y + r.h);
     return check_x && check_y;
 }
 
@@ -356,9 +366,7 @@ center_of :: (r: Rect) -> float, float {
 }
 
 screen_coord_to_board_idx :: (x: int, y: int, r: Rect) -> int {
-    if !is_point_in_rect(xx x, xx y, r) {
-        return -1;
-    }
+    if !is_point_in_rect(xx x, xx y, r)  return -1; // not valid if we are not in main rect
 
     sw := r.w / 3;
     sh := r.h / 3;
@@ -368,8 +376,15 @@ screen_coord_to_board_idx :: (x: int, y: int, r: Rect) -> int {
     offset := 9 * (grid_x + grid_y * 3);
     hL := L / 2;
 
-    pr := get_rect(r.x + grid_x * sh + hL, r.y + grid_y * sw + hL, sh - L, sw - L);
+    pr := get_rect(
+        r.x + grid_x * sh + hL, 
+        r.y + grid_y * sw + hL, 
+        sh - L, 
+        sw - L
+    );
     pr  = shrink_by(pr, .05);
+
+    if !is_point_in_rect(xx x, xx y, pr)  return -1;  // not valid if we are in the gutter
 
     ssh := (pr.w / 3);
     ssv := (pr.h / 3);
@@ -383,7 +398,12 @@ get_main_rect :: (win: Window_Type) -> Rect {
     win_x, win_y, win_w, win_h := get_dimensions(my_window, false);
     s := min(win_w, win_h);
 
-    r := get_rect(cast(float) win_w / 2 - cast(float) s / 2, cast(float) win_h / 2 - cast(float) s / 2, xx s, xx s);
+    r := get_rect(
+        cast(float) win_w / 2 - cast(float) s / 2, 
+        cast(float) win_h / 2 - cast(float) s / 2, 
+        xx s, 
+        xx s
+    );
     r = shrink_by(r, .05);
 
     return r;
