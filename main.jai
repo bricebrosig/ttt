@@ -16,7 +16,7 @@ TODO:
 [ ] rename stuff and comment stuff... your shit doesn't make sense rn
 [ ] switch to drawing around a center point
 [ ] switch to left handed?
-[ ] AI
+[ ] AI?
 [ ] readme with pretty pictures
 [ ] little jiggle when you try to play somewhere you aren't allowed
 
@@ -65,6 +65,9 @@ BASE_COLOR := Vector4.{.8,   .8,  .8,  1};
 HOT_COLOR  := Vector4.{.38, .54, .59, .8};
 WIN_COLOR  := Vector4.{.4,   .4,  .4,  1};
 
+jiggle_at     := -1;  // index into the grid for where we should jiggle a little bit
+jiggle_factor := 0.0;   // we only want to jiggle for a second or so - but idk if we do the whole spring system thing then it might not matter?
+jiggle_fade_speed := 7.0;
 
 main :: () {
     #if OS == .WINDOWS {
@@ -141,8 +144,14 @@ main :: () {
             live_game := state.wins[clicked_idx / 9] == .NONE;
 
             if valid_idx && live_game {
-                state.board[clicked_idx] = state.turn;
-                state.turn = ifx state.turn == .X then .O else .X;
+                if state.board[clicked_idx] == .NONE {
+                    state.board[clicked_idx] = state.turn;
+                    state.turn = ifx state.turn == .X then .O else .X;
+                } else {
+                    jiggle_at = clicked_idx;
+                    jiggle_factor = 0;  // start the fade
+                    print("start jiggle: %\n", jiggle_at);
+                }
             }
         }
 
@@ -156,6 +165,9 @@ main :: () {
 
         // check for game over
         state.winner = check_for_winner(state.wins, 0);
+
+        // update jiggle
+        jiggle_factor = move_toward(jiggle_factor, 1, dt * jiggle_fade_speed);
 
         // draw call
         draw_one_frame(state, dt);
@@ -215,6 +227,7 @@ draw_one_frame :: (state: GameState, dt: float) {
         mouse_in_board := is_point_in_rect(xx mouse_x, xx mouse_y, mouse_rect);
 
         if sub_game_live &&  mouse_in_board {
+            // find where to draw / how big
             ssh := (mouse_rect.w / 3);
             ssv := (mouse_rect.h / 3);
             sub_grid_col = cast(int) (mouse_x - mouse_rect.x) / cast(int) ssh;
@@ -223,6 +236,13 @@ draw_one_frame :: (state: GameState, dt: float) {
             xhl := ifx sub_grid_col == 0 then 0 else l / 2;
             yhl := ifx sub_grid_row == 0 then 0 else l / 2;
 
+            color := HOT_COLOR;
+
+            if screen_coord_to_board_idx(xx mouse_x, xx mouse_y, get_main_rect(my_window)) == jiggle_at {
+                color = lerp(Vector4.{1, 0, 0, 1}, HOT_COLOR, jiggle_factor);
+            }
+
+            // make rect and draw
             hot_rect := get_rect(
                 mouse_rect.x + sub_grid_col * ssh + xhl, 
                 mouse_rect.y + sub_grid_row * ssv + yhl, 
@@ -230,14 +250,14 @@ draw_one_frame :: (state: GameState, dt: float) {
                 ssv - l
             );
             hot_rect = shrink_by(hot_rect, .05);
+            // TODO (brice): a helper function that just takes a rect would be kind of sick
             Simp.immediate_quad(
                 hot_rect.x, 
                 hot_rect.y, 
                 hot_rect.x + hot_rect.w, 
                 hot_rect.y + hot_rect.h, 
-                HOT_COLOR
+                color
             );
-
         } else {
             sub_grid_col = -1;
             sub_grid_row = -1;
@@ -363,6 +383,26 @@ shrink_by :: (r: Rect, p: float) -> Rect {
 
 center_of :: (r: Rect) -> float, float {
     return r.x + r.w / 2, r.y + r.h / 2;
+}
+
+// @copypasta from GetRect
+move_toward :: (a: float, b: float, amount_increasing: float, amount_decreasing := -1.0) -> float {
+    if a > b {
+        if amount_decreasing == -1  amount_decreasing = amount_increasing;
+
+        a -= amount_decreasing;
+
+        if a < b  a = b;
+    } else {
+        a += amount_increasing;
+        if a > b  a = b;
+    }
+
+    return a;
+}
+
+spring_system :: (x: float, y: float, dt: float) -> float, float {
+    return 0, 0;
 }
 
 screen_coord_to_board_idx :: (x: int, y: int, r: Rect) -> int {
