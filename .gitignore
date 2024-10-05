@@ -6,3 +6,5 @@ main.dSYM
 .DS_STORE
 *.exe
 *.pdb
+*.raddbgi
+*.rdi

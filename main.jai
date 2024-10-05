@@ -5,20 +5,15 @@
 /* 
 TODO:
 [x] detect winner of a sub game
-[ ] draw line for winner
+[ ] animated draw line for winner
 [x] grey out
 [x] disable input into complete subgames
 [x] don't draw outside the boundary of the game board
 [ ] win screen
-[ ] make tests
-[ ] restart option on win screen
-[ ] main menu
-[ ] rename stuff and comment stuff... your shit doesn't make sense rn
+[ ] you should refactor some things...
 [ ] switch to drawing around a center point
-[ ] switch to left handed?
-[ ] AI?
-[ ] readme with pretty pictures
-[ ] little jiggle when you try to play somewhere you aren't allowed
+[ ] network!
+[x] little jiggle when you try to play somewhere you aren't allowed (settling for a red flash right now)
 
 
 indices reminder
@@ -60,13 +55,15 @@ GameState :: struct {
     winner :      Letter;
 }
 
-BG_COLOR   := Vector4.{.1,   .1,  .1,  1};
-BASE_COLOR := Vector4.{.8,   .8,  .8,  1};
-HOT_COLOR  := Vector4.{.38, .54, .59, .8};
-WIN_COLOR  := Vector4.{.4,   .4,  .4,  1};
+COLOR_BG   := Vector4.{.1,   .1,  .1,  1};
+COLOR_BASE := Vector4.{.8,   .8,  .8,  1};
+COLOR_HOT  := Vector4.{.38, .54, .59, .8};
+COLOR_WIN  := Vector4.{.4,   .4,  .4,  1};
+COLOR_GREY := Vector4.{.8,   .8,  .8, .25};
 
-jiggle_at     := -1;  // index into the grid for where we should jiggle a little bit
-jiggle_factor := 0.0;   // we only want to jiggle for a second or so - but idk if we do the whole spring system thing then it might not matter?
+// nocheckin - rename this
+jiggle_at     := -1;   // index into the grid for where we should jiggle a little bit
+jiggle_factor := 0.0;  // we only want to jiggle for a second or so - but idk if we do the whole spring system thing then it might not matter?
 jiggle_fade_speed := 7.0;
 
 main :: () {
@@ -95,7 +92,7 @@ main :: () {
         types := NSArray(NSPasteboardType).arrayWithObject(NSPasteboardTypeFileURL);
         NSView.registerForDraggedTypes(my_window, types);
     }
-
+    
     Simp.set_render_target(my_window);
 
     init_fonts();
@@ -150,7 +147,6 @@ main :: () {
                 } else {
                     jiggle_at = clicked_idx;
                     jiggle_factor = 0;  // start the fade
-                    print("start jiggle: %\n", jiggle_at);
                 }
             }
         }
@@ -178,12 +174,12 @@ main :: () {
 }  // main
 
 draw_one_frame :: (state: GameState, dt: float) {
-    Simp.clear_render_target(BG_COLOR.x, BG_COLOR.y, BG_COLOR.z, BG_COLOR.w);
+    Simp.clear_render_target(COLOR_BG.x, COLOR_BG.y, COLOR_BG.z, COLOR_BG.w);
     Simp.set_shader_for_color(true);  // with blend so alpha works
 
     r := get_main_rect(my_window);
 
-    draw_grid(r, L, BASE_COLOR);
+    draw_grid(r, L, COLOR_BASE);
 
     sv := cast(float) r.w / 3;  // vertical step size
     sh := cast(float) r.h / 3;  // horizontal step size
@@ -200,10 +196,9 @@ draw_one_frame :: (state: GameState, dt: float) {
             y  := r.y + row * sv;
             sr := get_rect(x, y, sh, sv);
             sr = shrink_by(sr, .05);
-
-            idx := grid_to_idx(row, col);
-            if state.wins[idx] != .NONE  draw_grid(sr, l, WIN_COLOR);
-            else                         draw_grid(sr, l, BASE_COLOR);
+            
+            color := ifx state.wins[grid_to_idx(row, col)] != .NONE then COLOR_GREY else COLOR_BASE;
+            draw_grid(sr, l, color);
         }
     }
 
@@ -226,7 +221,7 @@ draw_one_frame :: (state: GameState, dt: float) {
         mouse_rect = shrink_by(mouse_rect, .05);
         mouse_in_board := is_point_in_rect(xx mouse_x, xx mouse_y, mouse_rect);
 
-        if sub_game_live &&  mouse_in_board {
+        if sub_game_live && mouse_in_board {
             // find where to draw / how big
             ssh := (mouse_rect.w / 3);
             ssv := (mouse_rect.h / 3);
@@ -236,10 +231,10 @@ draw_one_frame :: (state: GameState, dt: float) {
             xhl := ifx sub_grid_col == 0 then 0 else l / 2;
             yhl := ifx sub_grid_row == 0 then 0 else l / 2;
 
-            color := HOT_COLOR;
+            color := COLOR_HOT;
 
             if screen_coord_to_board_idx(xx mouse_x, xx mouse_y, get_main_rect(my_window)) == jiggle_at {
-                color = lerp(Vector4.{1, 0, 0, 1}, HOT_COLOR, jiggle_factor);
+                color = lerp(Vector4.{1, 0, 0, 1}, COLOR_HOT, jiggle_factor);
             }
 
             // make rect and draw
@@ -250,14 +245,7 @@ draw_one_frame :: (state: GameState, dt: float) {
                 ssv - l
             );
             hot_rect = shrink_by(hot_rect, .05);
-            // TODO (brice): a helper function that just takes a rect would be kind of sick
-            Simp.immediate_quad(
-                hot_rect.x, 
-                hot_rect.y, 
-                hot_rect.x + hot_rect.w, 
-                hot_rect.y + hot_rect.h, 
-                color
-            );
+            draw_rect(hot_rect, color);
         } else {
             sub_grid_col = -1;
             sub_grid_row = -1;
@@ -268,7 +256,7 @@ draw_one_frame :: (state: GameState, dt: float) {
     for letter, i : state.board {
         sub :int = i / 9;  // which sub board we are in
 
-        color := ifx state.wins[sub] != .NONE then WIN_COLOR else BASE_COLOR;
+        color := ifx state.wins[sub] != .NONE then COLOR_GREY else COLOR_BASE;
 
         sub_x, sub_y := idx_to_grid_coord(sub);
         sub_r := grid_coord_to_rect(sub_x, sub_y, r, L);
@@ -278,13 +266,33 @@ draw_one_frame :: (state: GameState, dt: float) {
         tx, ty := center_of(ssr);
 
         if letter == .X {
-            draw_centered_text(my_font, "X", xx tx, xx ty, color);
+            draw_centered_text(font_reg, "X", xx tx, xx ty, color);
         } else if letter == .O {
-            draw_centered_text(my_font, "O", xx tx, xx ty, color);
+            draw_centered_text(font_reg, "O", xx tx, xx ty, color);
+        }
+    }
+    
+    // draw the winning xs and os
+    for row: 0..2 {
+        for col: 0..2 {
+            // draw the sub grid
+            // TODO (brice): this is way more work than necessary to get the location of the text
+            x  := r.x + col * sh;
+            y  := r.y + row * sv;
+            sr := get_rect(x, y, sh, sv);
+            sr = shrink_by(sr, .05);
+            
+            idx := grid_to_idx(row, col);
+            if state.wins[idx] != .NONE { 
+                // if we have a winner somewhere, then draw a big ass letter in that game slot
+                win_char := ifx state.wins[idx] == .X then "X" else "O";
+                tx, ty := center_of(sr);
+                draw_centered_text(font_win, win_char, xx tx, xx ty, COLOR_BASE);
+            }
         }
     }
 
-    Simp.draw_text(my_font, 32, 32, tprint("%'s turn", state.turn));
+    Simp.draw_text(font_reg, 32, 32, tprint("%'s turn", state.turn));
 
     Simp.swap_buffers(my_window);
 }  // draw_one_frame
@@ -317,8 +325,6 @@ idx_to_board_position :: (idx: int, r: Rect, l: float) -> x: float, y: float {
 }
 
 grid_to_idx :: (row: int, col: int) -> int {
-    // assert(row < 3 && row >= 0);
-    // assert(col < 3 && col >= 0);
     return row * 3 + col;
 }
 
@@ -370,6 +376,17 @@ draw_centered_text :: (font: *Simp.Dynamic_Font, text: string, x: int, y: int, c
     Simp.draw_prepared_text(font, shift_x, shift_y, color);
 }
 
+draw_rect :: inline (r: Rect, color: Vector4) {
+    Simp.immediate_quad(r.x, r.y, r.x + r.w, r.y + r.h, color);
+}
+
+draw_rect_outline :: (r: Rect, weight: int, color: Vector4) {
+    Simp.immediate_quad(r.x, r.y, r.x + weight, r.y + r.h,    color);
+    Simp.immediate_quad(r.x, r.y, r.x + r.w,    r.y + weight, color);
+    Simp.immediate_quad(r.x, r.y + r.h - weight, r.x + r.w, r.y + r.h, color);
+    Simp.immediate_quad(r.x + r.w - weight, r.y, r.x + r.w, r.y + r.h, color);
+}
+
 idx_to_grid_coord :: (idx: int) -> int, int {
     i := idx % 9;
     return i % 3, i / 3;
@@ -399,10 +416,6 @@ move_toward :: (a: float, b: float, amount_increasing: float, amount_decreasing 
     }
 
     return a;
-}
-
-spring_system :: (x: float, y: float, dt: float) -> float, float {
-    return 0, 0;
 }
 
 screen_coord_to_board_idx :: (x: int, y: int, r: Rect) -> int {
@@ -459,23 +472,17 @@ init_fonts :: () {
     }
 
     pixel_height := window_height / 22;
-    my_font = Simp.get_font_at_size("data", "HeavyDataNerdFont-Regular.ttf", pixel_height);
-    assert(my_font != null);
-
-    pixel_height /= 2;
-    button_font = Simp.get_font_at_size("data", "HeavyDataNerdFont-Regular.ttf", pixel_height);
-    assert(button_font != null);
-
-    pixel_height = window_height / 7;
-    title_font = Simp.get_font_at_size("data", "HeavyDataNerdFont-Regular.ttf", pixel_height);
+    font_reg = Simp.get_font_at_size("data", "HeavyDataNerdFont-Regular.ttf", pixel_height);
+    assert(font_reg != null);
+    
+    pixel_height = window_height / 4;
+    font_win = Simp.get_font_at_size("data", "HeavyDataNerdFont-Regular.ttf", pixel_height);
 }
 
 Font :: Simp.Dynamic_Font;
 
-my_font:     *Font;
-button_font: *Font;
-title_font:  *Font;
-
+font_reg: *Font;
+font_win: *Font;
 
 working_directory_set := false;
 
@@ -486,12 +493,6 @@ Input :: #import "Input";
 #import "GetRect";
 
 #import "Basic";
-Basic :: #import "Basic"; // :CompilerBug  We need this to resolve to_lower for some reason?!
 #import "Math";
 #import "System";  // For get_path_of_running_executable. @Cleanup.
 #import "String";  // For path_strip_filename. @Cleanup.
-
-modify_string :: (ps: *string, new_value: string) {
-    free(ps.*);
-    ps.* = copy_string(new_value);
-}
