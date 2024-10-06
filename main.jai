@@ -13,7 +13,19 @@ TODO:
 [ ] you should refactor some things...
 [ ] switch to drawing around a center point
 [ ] network!
-[x] little jiggle when you try to play somewhere you aren't allowed (settling for a red flash right now)
+[x] disable when you try to play somewhere you aren't allowed (settling for a red flash right now)
+[ ] rule that restricts next move (apparently this is how you actually make the super tic tac toe interesting)
+[ ] some UI indicator that you get to play anywhere?
+
+what are the other tables games?
+- connect 4
+- fill in boxes game
+- https://en.wikipedia.org/wiki/Racetrack_(game)
+- https://en.wikipedia.org/wiki/Gomoku
+
+what if subgames were these and the "map" was randomized?
+maybe playing in certain games is a certain # of action points (depending on the "importance" of that subgame) and you 
+play up to those action points?
 
 
 indices reminder
@@ -24,6 +36,8 @@ indices reminder
   --+---+--
   0 | 1 | 2
 */
+
+play_anywhere :: true;
 
 my_window: Window_Type;
 window_width : s32 = 1080;
@@ -55,16 +69,17 @@ GameState :: struct {
     winner :      Letter;
 }
 
+last_played_idx : int;
+
 COLOR_BG   := Vector4.{.1,   .1,  .1,  1};
 COLOR_BASE := Vector4.{.8,   .8,  .8,  1};
 COLOR_HOT  := Vector4.{.38, .54, .59, .8};
 COLOR_WIN  := Vector4.{.4,   .4,  .4,  1};
 COLOR_GREY := Vector4.{.8,   .8,  .8, .25};
 
-// nocheckin - rename this
-jiggle_at     := -1;   // index into the grid for where we should jiggle a little bit
-jiggle_factor := 0.0;  // we only want to jiggle for a second or so - but idk if we do the whole spring system thing then it might not matter?
-jiggle_fade_speed := 7.0;
+disable_at     := -1;   // index into the grid for where we should disable a little bit
+disable_factor := 0.0;  // we only want to disable for a second or so - but idk if we do the whole spring system thing then it might not matter?
+disable_fade_speed := 7.0;
 
 main :: () {
     #if OS == .WINDOWS {
@@ -99,6 +114,10 @@ main :: () {
 
     state: GameState;
     state.turn = .X;
+    
+    last_played_idx = -1;
+    
+    #run test_check_winner();  // don't compile if this fails
 
     quit := false;
     while !quit {
@@ -136,17 +155,29 @@ main :: () {
             mouse_x, mouse_y, _ := get_mouse_pointer_position(true);
             r := get_main_rect(my_window);
             clicked_idx := screen_coord_to_board_idx(mouse_x, mouse_y, r);
-            valid_idx := clicked_idx < 81 && clicked_idx >= 0;
+            
+            is_valid_click := clicked_idx < 81 && clicked_idx >= 0;
+            is_live_game   := state.wins[clicked_idx / 9] == .NONE;
+            
+            is_right_sub_game := last_played_idx == -1 || clicked_idx / 9 == last_played_idx;
+            
+            if play_anywhere {
+                is_right_sub_game = true;
+                last_played_idx = -1;
+            }
 
-            live_game := state.wins[clicked_idx / 9] == .NONE;
-
-            if valid_idx && live_game {
+            if is_valid_click && is_live_game && is_right_sub_game {
                 if state.board[clicked_idx] == .NONE {
                     state.board[clicked_idx] = state.turn;
                     state.turn = ifx state.turn == .X then .O else .X;
+                    last_played_idx = clicked_idx % 9;
+                    
+                    if last_played_idx >= 0 && state.wins[last_played_idx] != .NONE {
+                        last_played_idx = -1;  // if the game in that slot is over, next person gets to play anywhere
+                    }
                 } else {
-                    jiggle_at = clicked_idx;
-                    jiggle_factor = 0;  // start the fade
+                    disable_at = clicked_idx;
+                    disable_factor = 0;  // start the fade
                 }
             }
         }
@@ -162,8 +193,8 @@ main :: () {
         // check for game over
         state.winner = check_for_winner(state.wins, 0);
 
-        // update jiggle
-        jiggle_factor = move_toward(jiggle_factor, 1, dt * jiggle_fade_speed);
+        // update disable
+        disable_factor = move_toward(disable_factor, 1, dt * disable_fade_speed);
 
         // draw call
         draw_one_frame(state, dt);
@@ -189,6 +220,7 @@ draw_one_frame :: (state: GameState, dt: float) {
     main_grid_row, sub_grid_row: int;
 
     // draw the 9 subgrids -- checking if a grid is "done" and greying it out
+    idx := 0;
     for row: 0..2 {
         for col: 0..2 {
             // draw the sub grid
@@ -199,6 +231,12 @@ draw_one_frame :: (state: GameState, dt: float) {
             
             color := ifx state.wins[grid_to_idx(row, col)] != .NONE then COLOR_GREY else COLOR_BASE;
             draw_grid(sr, l, color);
+            
+            if idx == last_played_idx {         
+                draw_rect_outline(sr, 2, .{.9, .9, .1, 1});
+            }
+            
+            idx += 1;
         }
     }
 
@@ -233,8 +271,8 @@ draw_one_frame :: (state: GameState, dt: float) {
 
             color := COLOR_HOT;
 
-            if screen_coord_to_board_idx(xx mouse_x, xx mouse_y, get_main_rect(my_window)) == jiggle_at {
-                color = lerp(Vector4.{1, 0, 0, 1}, COLOR_HOT, jiggle_factor);
+            if screen_coord_to_board_idx(xx mouse_x, xx mouse_y, get_main_rect(my_window)) == disable_at {
+                color = lerp(Vector4.{1, 0, 0, 1}, COLOR_HOT, disable_factor);
             }
 
             // make rect and draw
@@ -251,7 +289,7 @@ draw_one_frame :: (state: GameState, dt: float) {
             sub_grid_row = -1;
         }
     }
-
+    
     // draw the Xs and Os
     for letter, i : state.board {
         sub :int = i / 9;  // which sub board we are in
@@ -291,8 +329,9 @@ draw_one_frame :: (state: GameState, dt: float) {
             }
         }
     }
-
-    Simp.draw_text(font_reg, 32, 32, tprint("%'s turn", state.turn));
+    
+    // info
+    Simp.draw_text(font_reg, 32, 32, tprint("%'s turn -- active sub game: %", state.turn, last_played_idx));
 
     Simp.swap_buffers(my_window);
 }  // draw_one_frame
@@ -328,25 +367,56 @@ grid_to_idx :: (row: int, col: int) -> int {
     return row * 3 + col;
 }
 
-same :: (a: Letter, b: Letter, c: Letter) -> bool {
-    return a == b && b == c && a == c;
+same_and_not_none :: inline (a: Letter, b: Letter, c: Letter) -> bool {
+    return a == b && b == c && a == c && a != .NONE;
 }
 
-// TODO (brice): return the line that we should draw as a part of the return
 check_for_winner :: (arr: []Letter, o: int) -> Letter {
     assert(o % 9 == 0);
-        for 0..2 {
+    
+    for 0..2 {
         i := o + it * 3;
-        if same(arr[i], arr[i + 1], arr[i + 2])  return arr[i];
+        if same_and_not_none(arr[i], arr[i + 1], arr[i + 2])  return arr[i];
 
         i = o + it;
-        if same(arr[i], arr[i + 3], arr[i + 6])  return arr[i];
+        if same_and_not_none(arr[i], arr[i + 3], arr[i + 6])  return arr[i];
     }
 
-    if same(arr[o], arr[o + 4], arr[o + 8])      return arr[o];
-    if same(arr[o + 2], arr[o + 4], arr[o + 6])  return arr[o + 2];
+    if same_and_not_none(arr[o], arr[o + 4], arr[o + 8])      return arr[o];
+    if same_and_not_none(arr[o + 2], arr[o + 4], arr[o + 6])  return arr[o + 2];
 
     return .NONE;
+}
+
+test_check_winner :: () {
+    
+    assert(check_for_winner(.[   .X,    .X,    .X, 
+                              .NONE, .NONE, .NONE, 
+                              .NONE, .NONE, .NONE], 0) == .X);
+                       
+    assert(check_for_winner(.[.NONE, .NONE, .NONE,
+                              .X,    .X,    .X, 
+                              .NONE, .NONE, .NONE], 0) == .X);
+    assert(check_for_winner(.[.NONE, .NONE, .NONE,
+                              .NONE, .NONE, .NONE,
+                              .X,    .X,    .X], 0) == .X);
+                              
+    assert(check_for_winner(.[.X, .NONE, .NONE,
+                              .X, .NONE, .NONE,
+                              .X, .NONE, .NONE], 0) == .X);
+    assert(check_for_winner(.[.NONE, .X, .NONE,
+                              .NONE, .X, .NONE,
+                              .NONE, .X, .NONE], 0) == .X);
+    assert(check_for_winner(.[.NONE, .NONE, .X,
+                              .NONE, .NONE, .X,
+                              .NONE, .NONE, .X], 0) == .X);
+                              
+    assert(check_for_winner(.[.X, .NONE, .NONE,
+                              .NONE, .X, .NONE,
+                              .NONE, .NONE, .X], 0) == .X);
+    assert(check_for_winner(.[.NONE, .NONE, .X,
+                              .NONE, .X, .NONE,
+                              .X, .NONE, .NONE], 0) == .X);
 }
 
 grid_coord_to_rect :: (xi: int, yi: int, r: Rect, l: float) -> Rect {
