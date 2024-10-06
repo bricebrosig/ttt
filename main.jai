@@ -11,11 +11,10 @@ TODO:
 [x] don't draw outside the boundary of the game board
 [ ] win screen
 [ ] you should refactor some things...
-[ ] switch to drawing around a center point
 [ ] network!
 [x] disable when you try to play somewhere you aren't allowed (settling for a red flash right now)
-[ ] rule that restricts next move (apparently this is how you actually make the super tic tac toe interesting)
-[ ] some UI indicator that you get to play anywhere?
+[x] rule that restricts next move (apparently this is how you actually make the super tic tac toe interesting)
+[x] some UI indicator that you get to play anywhere?
 
 what are the other tables games?
 - connect 4
@@ -29,7 +28,6 @@ play up to those action points?
 
 
 indices reminder
-
   6 | 7 | 8
   --+---+--
   3 | 4 | 5
@@ -37,7 +35,7 @@ indices reminder
   0 | 1 | 2
 */
 
-play_anywhere :: true;
+no_restrict := true;  // for debugging
 
 my_window: Window_Type;
 window_width : s32 = 1080;
@@ -81,40 +79,19 @@ disable_at     := -1;   // index into the grid for where we should disable a lit
 disable_factor := 0.0;  // we only want to disable for a second or so - but idk if we do the whole spring system thing then it might not matter?
 disable_fade_speed := 7.0;
 
+active_rect_p := 1.0;
+active_p_target: float;
+
+changed_win_state_at: int = -1;
+win_line_p: float = 0.0;
+
 main :: () {
-    #if OS == .WINDOWS {
-        Windows :: #import "Windows";
-        Windows.SetProcessDPIAware();
-        Windows.timeBeginPeriod(1);  // Windows is very bad at thread-switching by default unless you do this. Sad.
-    }
-
-    my_window = create_window(window_width, window_height, "Tic-Tac-Toe");
-    #if OS == .WINDOWS {
-        // @Feature: Add user-specific typelist support.
-        Windows.DragAcceptFiles(my_window, cast(Windows.BOOL) true);
-    } else #if OS == .LINUX {
-        X11 :: #import "X11";
-        typelist := string.[
-            "url/url",
-            "text/uri-list",
-            "text/plain",
-            "application/octet-stream"
-        ];
-        X11.enable_drag_and_drop(my_window, typelist);
-    } else #if OS == .MACOS {
-        #import "Objective_C";
-        #import "Objective_C/AppKit";
-        types := NSArray(NSPasteboardType).arrayWithObject(NSPasteboardTypeFileURL);
-        NSView.registerForDraggedTypes(my_window, types);
-    }
-    
+    my_window := init_window();
     Simp.set_render_target(my_window);
-
     init_fonts();
 
     state: GameState;
-    state.turn = .X;
-    
+    state.turn = .X;    
     last_played_idx = -1;
     
     #run test_check_winner();  // don't compile if this fails
@@ -148,6 +125,10 @@ main :: () {
             if event.key_code == .MOUSE_BUTTON_LEFT && event.key_pressed {
                 clicked = true;
             }
+            
+            if event.key_code == .SPACEBAR && event.key_pressed {
+                no_restrict = !no_restrict;
+            }
         }
 
         // click on board
@@ -161,7 +142,7 @@ main :: () {
             
             is_right_sub_game := last_played_idx == -1 || clicked_idx / 9 == last_played_idx;
             
-            if play_anywhere {
+            if no_restrict {
                 is_right_sub_game = true;
                 last_played_idx = -1;
             }
@@ -185,8 +166,12 @@ main :: () {
         // check for winners
         for 0..8 {
             if state.wins[it] == .NONE {
-                new_status := check_for_winner(state.board, it * 9);
-                state.wins[it] = new_status;
+                state.wins[it] = check_for_winner(state.board, it * 9);
+                
+                if state.wins[it] != .NONE {
+                    changed_win_state_at = it;
+                    win_line_p = 0.0;
+                }
             }
         }
 
@@ -195,6 +180,22 @@ main :: () {
 
         // update disable
         disable_factor = move_toward(disable_factor, 1, dt * disable_fade_speed);
+        
+        // update active highlighter
+        upper :: 1.05;
+        lower :: 1.0;
+        p_factor :: .1;
+        if active_rect_p <= lower  active_p_target = upper;
+        if active_rect_p >= upper  active_p_target = lower;
+        
+        active_rect_p = move_toward(active_rect_p, active_p_target, dt * p_factor);
+
+        // update win line animator
+        win_line_dp :: 3.0;
+        win_line_p = move_toward(win_line_p, 1.0, dt * win_line_dp);
+        if win_line_p == 1.0 {
+            changed_win_state_at = -1;  // just turn this off so we know to draw a letter
+        }
 
         // draw call
         draw_one_frame(state, dt);
@@ -204,10 +205,41 @@ main :: () {
     }  // while true
 }  // main
 
+init_window :: () -> Window_Type {
+    #if OS == .WINDOWS {
+        Windows :: #import "Windows";
+        Windows.SetProcessDPIAware();
+        Windows.timeBeginPeriod(1);  // Windows is very bad at thread-switching by default unless you do this. Sad.
+    }
+
+    my_window = create_window(window_width, window_height, "Tic-Tac-Toe");
+    #if OS == .WINDOWS {
+        // @Feature: Add user-specific typelist support.
+        Windows.DragAcceptFiles(my_window, cast(Windows.BOOL) true);
+    } else #if OS == .LINUX {
+        X11 :: #import "X11";
+        typelist := string.[
+            "url/url",
+            "text/uri-list",
+            "text/plain",
+            "application/octet-stream"
+        ];
+        X11.enable_drag_and_drop(my_window, typelist);
+    } else #if OS == .MACOS {
+        #import "Objective_C";
+        #import "Objective_C/AppKit";
+        types := NSArray(NSPasteboardType).arrayWithObject(NSPasteboardTypeFileURL);
+        NSView.registerForDraggedTypes(my_window, types);
+    }
+    
+    return my_window;
+}
+
 draw_one_frame :: (state: GameState, dt: float) {
     Simp.clear_render_target(COLOR_BG.x, COLOR_BG.y, COLOR_BG.z, COLOR_BG.w);
-    Simp.set_shader_for_color(true);  // with blend so alpha works
 
+    Simp.set_shader_for_color(true);  // with blend so alpha works
+    
     r := get_main_rect(my_window);
 
     draw_grid(r, L, COLOR_BASE);
@@ -233,11 +265,15 @@ draw_one_frame :: (state: GameState, dt: float) {
             draw_grid(sr, l, color);
             
             if idx == last_played_idx {         
-                draw_rect_outline(sr, 2, .{.9, .9, .1, 1});
+                draw_rect_outline(rect_percentage(sr, active_rect_p), 2, .{.9, .9, .1, 1});
             }
             
             idx += 1;
         }
+    }
+    
+    if !no_restrict && last_played_idx == -1 {
+        draw_rect_outline(rect_percentage(r, active_rect_p), 4, .{.9, .9, .1, 1});
     }
 
     // draw hot rect inside that sub grid
@@ -248,7 +284,8 @@ draw_one_frame :: (state: GameState, dt: float) {
 
         // only draw the hot rects if that game is still live, otherwise, we bail
         idx := grid_to_idx(main_grid_row, main_grid_col);
-        sub_game_live := state.wins[idx] == .NONE;
+        sub_game_live := idx >= 0 && idx < 9 && state.wins[idx] == .NONE;
+        sub_game_allowed := idx == last_played_idx || last_played_idx == -1;
 
         mouse_rect := get_rect(
             r.x + main_grid_col * sh + hL, 
@@ -259,7 +296,7 @@ draw_one_frame :: (state: GameState, dt: float) {
         mouse_rect = shrink_by(mouse_rect, .05);
         mouse_in_board := is_point_in_rect(xx mouse_x, xx mouse_y, mouse_rect);
 
-        if sub_game_live && mouse_in_board {
+        if sub_game_allowed && sub_game_live && mouse_in_board {
             // find where to draw / how big
             ssh := (mouse_rect.w / 3);
             ssv := (mouse_rect.h / 3);
@@ -290,6 +327,28 @@ draw_one_frame :: (state: GameState, dt: float) {
         }
     }
     
+    if changed_win_state_at != -1 {
+        // these means we should be animating the draw line
+        Simp.set_shader_for_color(true);
+        row, col := idx_to_grid_coord(changed_win_state_at);
+        sr := get_rect(r.x + col * sh, r.y + row * sv, sh, sv);
+        sr = shrink_by(sr, .05);
+        
+        x := sr.x;
+        y := sr.y;
+        dy: float = sr.h * win_line_p;
+        dx: float = sr.w * win_line_p;
+        Simp.immediate_quad(
+            .{x,     y},
+            .{x + dx - L, y + dy}, 
+            .{x + dx,     y + dy}, 
+            .{x + L, y},
+            COLOR_BASE
+        );
+    } 
+    
+    Simp.set_shader_for_text();
+    
     // draw the Xs and Os
     for letter, i : state.board {
         sub :int = i / 9;  // which sub board we are in
@@ -310,18 +369,17 @@ draw_one_frame :: (state: GameState, dt: float) {
         }
     }
     
-    // draw the winning xs and os
+    
+    // draw the winning xs and os (or the line that animates winnning)
     for row: 0..2 {
         for col: 0..2 {
             // draw the sub grid
             // TODO (brice): this is way more work than necessary to get the location of the text
-            x  := r.x + col * sh;
-            y  := r.y + row * sv;
-            sr := get_rect(x, y, sh, sv);
+            sr := get_rect(r.x + col * sh, r.y + row * sv, sh, sv);
             sr = shrink_by(sr, .05);
             
             idx := grid_to_idx(row, col);
-            if state.wins[idx] != .NONE { 
+            if state.wins[idx] != .NONE  && idx != changed_win_state_at { 
                 // if we have a winner somewhere, then draw a big ass letter in that game slot
                 win_char := ifx state.wins[idx] == .X then "X" else "O";
                 tx, ty := center_of(sr);
@@ -331,7 +389,9 @@ draw_one_frame :: (state: GameState, dt: float) {
     }
     
     // info
-    Simp.draw_text(font_reg, 32, 32, tprint("%'s turn -- active sub game: %", state.turn, last_played_idx));
+    Simp.draw_text(font_dbg, 32, 40, tprint("%'s turn", state.turn));
+    if no_restrict
+        Simp.draw_text(font_dbg, 32, 12, tprint("no restrict"));
 
     Simp.swap_buffers(my_window);
 }  // draw_one_frame
@@ -389,34 +449,19 @@ check_for_winner :: (arr: []Letter, o: int) -> Letter {
 }
 
 test_check_winner :: () {
-    
-    assert(check_for_winner(.[   .X,    .X,    .X, 
-                              .NONE, .NONE, .NONE, 
-                              .NONE, .NONE, .NONE], 0) == .X);
-                       
-    assert(check_for_winner(.[.NONE, .NONE, .NONE,
-                              .X,    .X,    .X, 
-                              .NONE, .NONE, .NONE], 0) == .X);
-    assert(check_for_winner(.[.NONE, .NONE, .NONE,
-                              .NONE, .NONE, .NONE,
-                              .X,    .X,    .X], 0) == .X);
-                              
-    assert(check_for_winner(.[.X, .NONE, .NONE,
-                              .X, .NONE, .NONE,
-                              .X, .NONE, .NONE], 0) == .X);
-    assert(check_for_winner(.[.NONE, .X, .NONE,
-                              .NONE, .X, .NONE,
-                              .NONE, .X, .NONE], 0) == .X);
-    assert(check_for_winner(.[.NONE, .NONE, .X,
-                              .NONE, .NONE, .X,
-                              .NONE, .NONE, .X], 0) == .X);
-                              
-    assert(check_for_winner(.[.X, .NONE, .NONE,
-                              .NONE, .X, .NONE,
-                              .NONE, .NONE, .X], 0) == .X);
-    assert(check_for_winner(.[.NONE, .NONE, .X,
-                              .NONE, .X, .NONE,
-                              .X, .NONE, .NONE], 0) == .X);
+    // horizontal
+    assert(check_for_winner(.[.X, .X, .X, .NONE, .NONE, .NONE, .NONE, .NONE, .NONE], 0) == .X);
+    assert(check_for_winner(.[.NONE, .NONE, .NONE, .X, .X, .X, .NONE, .NONE, .NONE], 0) == .X);
+    assert(check_for_winner(.[.NONE, .NONE, .NONE, .NONE, .NONE, .NONE, .X, .X, .X], 0) == .X);
+
+    // vertical                 
+    assert(check_for_winner(.[.X, .NONE, .NONE, .X, .NONE, .NONE, .X, .NONE, .NONE], 0) == .X);
+    assert(check_for_winner(.[.NONE, .X, .NONE, .NONE, .X, .NONE, .NONE, .X, .NONE], 0) == .X);
+    assert(check_for_winner(.[.NONE, .NONE, .X, .NONE, .NONE, .X, .NONE, .NONE, .X], 0) == .X);
+
+    // diagonal             
+    assert(check_for_winner(.[.X, .NONE, .NONE, .NONE, .X, .NONE, .NONE, .NONE, .X], 0) == .X);
+    assert(check_for_winner(.[.NONE, .NONE, .X, .NONE, .X, .NONE, .X, .NONE, .NONE], 0) == .X);
 }
 
 grid_coord_to_rect :: (xi: int, yi: int, r: Rect, l: float) -> Rect {
@@ -465,6 +510,16 @@ idx_to_grid_coord :: (idx: int) -> int, int {
 shrink_by :: (r: Rect, p: float) -> Rect {
     nr := shrink(r,  r.w * p);
     nr  = shrink(nr, r.h * p);
+    return nr;
+}
+
+rect_percentage :: (r: Rect, p: float) -> Rect {
+    nr :Rect;
+    nr.w = r.w * p;
+    nr.h = r.h * p;
+    nr.x = r.x + (r.w - nr.w) / 2;
+    nr.y = r.y + (r.h - nr.h) / 2;
+    
     return nr;
 }
 
@@ -547,12 +602,18 @@ init_fonts :: () {
     
     pixel_height = window_height / 4;
     font_win = Simp.get_font_at_size("data", "HeavyDataNerdFont-Regular.ttf", pixel_height);
+    assert(font_reg != null);
+    
+    pixel_height = window_height / 28;
+    font_dbg = Simp.get_font_at_size("data", "HeavyDataNerdFont-Regular.ttf", pixel_height);
+    assert(font_reg != null);
 }
 
 Font :: Simp.Dynamic_Font;
 
 font_reg: *Font;
 font_win: *Font;
+font_dbg: *Font;
 
 working_directory_set := false;
 
