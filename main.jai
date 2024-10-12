@@ -44,8 +44,8 @@ window_height: s32 = 1080;
 current_time : float64;
 last_time    : float64;
 
-L := 6.0;  // big line width
-l := 4.0;  // little line width
+L :: 6.0;  // big line width
+l :: 4.0;  // little line width
 
 Letter :: enum {
     NONE;
@@ -69,11 +69,11 @@ GameState :: struct {
 
 last_played_idx : int;
 
-COLOR_BG   := Vector4.{.1,   .1,  .1,  1};
-COLOR_BASE := Vector4.{.8,   .8,  .8,  1};
-COLOR_HOT  := Vector4.{.38, .54, .59, .8};
-COLOR_WIN  := Vector4.{.4,   .4,  .4,  1};
-COLOR_GREY := Vector4.{.8,   .8,  .8, .25};
+COLOR_BG   :: Vector4.{.1,   .1,  .1,  1};
+COLOR_BASE :: Vector4.{.8,   .8,  .8,  1};
+COLOR_HOT  :: Vector4.{.38, .54, .59, .8};
+COLOR_WIN  :: Vector4.{.4,   .4,  .4,  1};
+COLOR_GREY :: Vector4.{.8,   .8,  .8, .25};
 
 disable_at     := -1;   // index into the grid for where we should disable a little bit
 disable_factor := 0.0;  // we only want to disable for a second or so - but idk if we do the whole spring system thing then it might not matter?
@@ -84,6 +84,10 @@ active_p_target: float;
 
 changed_win_state_at: int = -1;
 win_line_p: float = 0.0;
+// start x, start y, end x, and end y for the win line draw animation
+// compute these in update right when they make their move
+win_sx, win_sy: float;
+win_ex, win_ey: float;
 
 main :: () {
     my_window := init_window();
@@ -237,50 +241,43 @@ init_window :: () -> Window_Type {
 
 draw_one_frame :: (state: GameState, dt: float) {
     Simp.clear_render_target(COLOR_BG.x, COLOR_BG.y, COLOR_BG.z, COLOR_BG.w);
-
     Simp.set_shader_for_color(true);  // with blend so alpha works
     
-    r := get_main_rect(my_window);
+    main_rect := get_main_rect(my_window);
 
-    draw_grid(r, L, COLOR_BASE);
+    draw_grid(main_rect, L, COLOR_BASE);
 
-    sv := cast(float) r.w / 3;  // vertical step size
-    sh := cast(float) r.h / 3;  // horizontal step size
-
-    mouse_x, mouse_y, _ := get_mouse_pointer_position(true);
-    main_grid_col, sub_grid_col: int;
-    main_grid_row, sub_grid_row: int;
+    sv := cast(float) main_rect.w / 3;  // vertical step size
+    sh := cast(float) main_rect.h / 3;  // horizontal step size
 
     // draw the 9 subgrids -- checking if a grid is "done" and greying it out
-    idx := 0;
     for row: 0..2 {
         for col: 0..2 {
             // draw the sub grid
-            x  := r.x + col * sh;
-            y  := r.y + row * sv;
+            x  := main_rect.x + col * sh;
+            y  := main_rect.y + row * sv;
             sr := get_rect(x, y, sh, sv);
             sr = shrink_by(sr, .05);
             
             color := ifx state.wins[grid_to_idx(row, col)] != .NONE then COLOR_GREY else COLOR_BASE;
             draw_grid(sr, l, color);
             
-            if idx == last_played_idx {         
+            if grid_to_idx(row, col) == last_played_idx {         
                 draw_rect_outline(rect_percentage(sr, active_rect_p), 2, .{.9, .9, .1, 1});
             }
-            
-            idx += 1;
         }
     }
     
     if !no_restrict && last_played_idx == -1 {
-        draw_rect_outline(rect_percentage(r, active_rect_p), 4, .{.9, .9, .1, 1});
+        draw_rect_outline(rect_percentage(main_rect, active_rect_p), 4, .{.9, .9, .1, 1});
     }
 
     // draw hot rect inside that sub grid
-    if is_point_in_rect(xx mouse_x, xx mouse_y, r) {  // if inside main board
-        main_grid_col = cast(int) (mouse_x - r.x) / cast(int) sv;
-        main_grid_row = cast(int) (mouse_y - r.y) / cast(int) sh;
-        hL := L / 2;
+    mouse_x, mouse_y, _ := get_mouse_pointer_position(true);
+    if is_point_in_rect(xx mouse_x, xx mouse_y, main_rect) {
+        main_grid_col := cast(int) (mouse_x - main_rect.x) / cast(int) sv;
+        main_grid_row := cast(int) (mouse_y - main_rect.y) / cast(int) sh;
+        hL :: L / 2;
 
         // only draw the hot rects if that game is still live, otherwise, we bail
         idx := grid_to_idx(main_grid_row, main_grid_col);
@@ -288,8 +285,8 @@ draw_one_frame :: (state: GameState, dt: float) {
         sub_game_allowed := idx == last_played_idx || last_played_idx == -1;
 
         mouse_rect := get_rect(
-            r.x + main_grid_col * sh + hL, 
-            r.y + main_grid_row * sv + hL, 
+            main_rect.x + main_grid_col * sh + hL, 
+            main_rect.y + main_grid_row * sv + hL, 
             sh - L, 
             sv - L
         );
@@ -300,30 +297,25 @@ draw_one_frame :: (state: GameState, dt: float) {
             // find where to draw / how big
             ssh := (mouse_rect.w / 3);
             ssv := (mouse_rect.h / 3);
-            sub_grid_col = cast(int) (mouse_x - mouse_rect.x) / cast(int) ssh;
-            sub_grid_row = cast(int) (mouse_y - mouse_rect.y) / cast(int) ssv;
-
-            xhl := ifx sub_grid_col == 0 then 0 else l / 2;
-            yhl := ifx sub_grid_row == 0 then 0 else l / 2;
+            sub_grid_col := cast(int) (mouse_x - mouse_rect.x) / cast(int) ssh;
+            sub_grid_row := cast(int) (mouse_y - mouse_rect.y) / cast(int) ssv;
 
             color := COLOR_HOT;
-
             if screen_coord_to_board_idx(xx mouse_x, xx mouse_y, get_main_rect(my_window)) == disable_at {
                 color = lerp(Vector4.{1, 0, 0, 1}, COLOR_HOT, disable_factor);
             }
 
             // make rect and draw
+            xhl := ifx sub_grid_col == 0 then 0 else l / 2;
+            yhl := ifx sub_grid_row == 0 then 0 else l / 2;
             hot_rect := get_rect(
-                mouse_rect.x + sub_grid_col * ssh + xhl, 
-                mouse_rect.y + sub_grid_row * ssv + yhl, 
+                mouse_rect.x + sub_grid_col * (ssh + xhl), 
+                mouse_rect.y + sub_grid_row * (ssv + yhl), 
                 ssh - l, 
                 ssv - l
             );
             hot_rect = shrink_by(hot_rect, .05);
             draw_rect(hot_rect, color);
-        } else {
-            sub_grid_col = -1;
-            sub_grid_row = -1;
         }
     }
     
@@ -331,13 +323,13 @@ draw_one_frame :: (state: GameState, dt: float) {
         // these means we should be animating the draw line
         Simp.set_shader_for_color(true);
         row, col := idx_to_grid_coord(changed_win_state_at);
-        sr := get_rect(r.x + col * sh, r.y + row * sv, sh, sv);
+        sr := get_rect(main_rect.x + col * sh, main_rect.y + row * sv, sh, sv);
         sr = shrink_by(sr, .05);
         
-        x := sr.x;
-        y := sr.y;
-        dy: float = sr.h * win_line_p;
-        dx: float = sr.w * win_line_p;
+        x  := sr.x;
+        y  := sr.y;
+        dy := sr.h * win_line_p;
+        dx := sr.w * win_line_p;
         Simp.immediate_quad(
             .{x,     y},
             .{x + dx - L, y + dy}, 
@@ -356,7 +348,7 @@ draw_one_frame :: (state: GameState, dt: float) {
         color := ifx state.wins[sub] != .NONE then COLOR_GREY else COLOR_BASE;
 
         sub_x, sub_y := idx_to_grid_coord(sub);
-        sub_r := grid_coord_to_rect(sub_x, sub_y, r, L);
+        sub_r := grid_coord_to_rect(sub_x, sub_y, main_rect, L);
 
         ssx, ssy := idx_to_grid_coord(i);
         ssr := grid_coord_to_rect(ssx, ssy, sub_r, l);
@@ -375,7 +367,7 @@ draw_one_frame :: (state: GameState, dt: float) {
         for col: 0..2 {
             // draw the sub grid
             // TODO (brice): this is way more work than necessary to get the location of the text
-            sr := get_rect(r.x + col * sh, r.y + row * sv, sh, sv);
+            sr := get_rect(main_rect.x + col * sh, main_rect.y + row * sv, sh, sv);
             sr = shrink_by(sr, .05);
             
             idx := grid_to_idx(row, col);
